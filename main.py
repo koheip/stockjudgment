@@ -1,12 +1,16 @@
 import os
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import yfinance as yf
+from dotenv import load_dotenv
 
 try:
-    from typesafe import TypeSafe
+    from typesafe_sdk import TypeSafeClient
 except ImportError:
-    TypeSafe = None
+    TypeSafeClient = None
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 app = FastAPI()
 
@@ -18,7 +22,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = TypeSafe(api_key=os.getenv("TYPESAFE_API_KEY")) if TypeSafe and os.getenv("TYPESAFE_API_KEY") else None
+def get_typesafe_client():
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+    api_key = os.getenv("TYPESAFE_API_KEY")
+    if not api_key:
+        return None, "外部予測APIの接続情報がないため、10年間の成長率から簡易予測をしています。"
+    if TypeSafeClient is None:
+        return None, "外部予測APIが利用できないため、10年間の成長率から簡易予測をしています。"
+    try:
+        return TypeSafeClient(api_key=api_key), None
+    except Exception as exc:
+        return None, f"外部予測APIの初期化に失敗しました: {exc}"
 
 
 @app.get("/")
@@ -59,8 +73,10 @@ def predict_stock(ticker: str):
         "recent_news": news_titles,
     }
 
+    client, fallback_reason = get_typesafe_client()
     if client is None:
         direction = "UP" if projected_change_pct >= 0 else "DOWN" if projected_change_pct < 0 else "NEUTRAL"
+        reason = fallback_reason or "TYPESAFE_API_KEY が未設定のため、10年間の成長率から簡易予測をしています。"
         return {
             "ticker": ticker,
             "latest_price": latest_price,
@@ -70,26 +86,29 @@ def predict_stock(ticker: str):
             "prediction": {
                 "mode": "fallback",
                 "choice": direction,
-                "reason": "TYPESAFE_API_KEY が未設定のため、10年間の成長率から簡易予測をしています。",
+                "reason": reason,
                 "state": state,
             },
         }
 
-    response = client.evaluate(
+    response = client.system_one(
         model="jev-1.13.0",
         state=state,
-        questions=[
-            {
+        questions={
+            "trend": {
                 "type": "choice",
-                "question": f"Stateのデータに基づき、{ticker} の10年後の株価動向として最も確率が高い選択肢を選んでください。",
-                "options": {
+                "instructions": f"Stateのデータに基づき、{ticker} の10年後の株価動向として最も確率が高い選択肢を選んでください。",
+                "criteria": {
                     "UP": "10年後に上昇する",
                     "DOWN": "10年後に下落する",
                     "NEUTRAL": "10年後にほぼ横ばい",
                 },
             }
-        ],
+        },
     )
+
+    answer = getattr(response, "choices", {}).get("trend", None)
+    choice = getattr(answer, "choice", None) if answer is not None else None
 
     return {
         "ticker": ticker,
@@ -97,5 +116,9 @@ def predict_stock(ticker: str):
         "prediction_horizon_years": 10,
         "projected_price_10y": round(projected_price_10y, 2),
         "projected_change_pct": round(projected_change_pct, 2),
-        "prediction": response,
+        "prediction": {
+            "mode": "typesafe",
+            "choice": choice,
+            "raw": response.model_dump() if hasattr(response, "model_dump") else response,
+        },
     }

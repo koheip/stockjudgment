@@ -12,9 +12,9 @@ if st.button("10年後を予測"):
 
         if res.status_code == 200:
             data = res.json()
-            st.write(f"**現在の株価**: {data['latest_price']:.0f} 円")
-            st.write(f"**10年後の予想価格**: {data['projected_price_10y']:.0f} 円")
-            st.write(f"**10年後の変化率**: {data['projected_change_pct']:.1f}%")
-            st.json(data['prediction'])
+            st.write(f"**現在の株価**: {data.get('latest_price', 0):.0f} 円")
+            st.write(f"**10年後の予想価格**: {data.get('projected_price_10y', 0):.0f} 円")
+            st.write(f"**10年後の変化率**: {data.get('projected_change_pct', 0):.1f}%")
+            st.json(data.get('prediction', {}))
         else:
             st.error("データの取得に失敗しました。")
