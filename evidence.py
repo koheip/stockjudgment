@@ -1,7 +1,13 @@
 """Collect dated evidence without inventing missing financial values."""
+import logging
 import math
+import time
 from numbers import Real
 import pandas as pd
+from curl_cffi import requests as curl_requests
+
+logger = logging.getLogger("uvicorn.error")
+TIMESERIES_URL = "https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/{}"
 
 
 def number(value):
@@ -24,18 +30,53 @@ def annual_records(frame, fields):
     return records
 
 
-def collect_evidence(stock):
-    result = {"income": [], "cashflow": [], "balance": [], "price_history": {}, "warnings": []}
+def timeseries_records(ticker, sources):
+    """Annual statements straight from Yahoo's timeseries endpoint.
+
+    Unlike quoteSummary this endpoint needs no cookie/crumb, so it keeps working on cloud
+    hosts where yfinance's crumb handshake fails. It also reports the statement currency."""
+    now = int(time.time())
+    types = {"annual" + name.replace(" ", ""): (key, name) for key, _, fields in sources for name in fields}
+    response = curl_requests.get(TIMESERIES_URL.format(ticker), impersonate="chrome", timeout=20,
+                                 params=dict(symbol=ticker, type=",".join(types), period1=now - 7 * 365 * 86400, period2=now))
+    response.raise_for_status()
+    periods, currency = {}, None
+    for series in (response.json().get("timeseries") or {}).get("result") or []:
+        kind = ((series.get("meta") or {}).get("type") or [None])[0]
+        if kind not in types:
+            continue
+        key, name = types[kind]
+        for point in series.get(kind) or []:
+            value = number(((point or {}).get("reportedValue") or {}).get("raw"))
+            if value is None or not point.get("asOfDate"):
+                continue
+            periods.setdefault(key, {}).setdefault(point["asOfDate"], {})[name] = value
+            currency = currency or (point.get("currencyCode") if name != "Diluted EPS" else None)
+    records = {key: [dict(period_end=date, **values) for date, values in sorted(dates.items(), reverse=True)[:5]]
+               for key, dates in periods.items()}
+    return records, currency
+
+
+def collect_evidence(stock, ticker=None):
+    result = {"income": [], "cashflow": [], "balance": [], "price_history": {}, "warnings": [], "financial_currency": None}
     sources = [
         ("income", "get_income_stmt", ["Total Revenue", "Operating Income", "Net Income", "Diluted EPS"]),
         ("cashflow", "get_cash_flow", ["Operating Cash Flow", "Free Cash Flow", "Capital Expenditure"]),
         ("balance", "get_balance_sheet", ["Total Debt", "Stockholders Equity", "Cash And Cash Equivalents"]),
     ]
-    for key, method, fields in sources:
+    direct = {}
+    if ticker:
         try:
-            result[key] = annual_records(getattr(stock, method)(freq="yearly", pretty=True), fields)
-        except Exception:
-            pass
+            direct, result["financial_currency"] = timeseries_records(ticker, sources)
+        except Exception as exc:
+            logger.warning("timeseries fetch failed for %s: %r", ticker, exc)
+    for key, method, fields in sources:
+        result[key] = direct.get(key, [])
+        if not result[key]:
+            try:
+                result[key] = annual_records(getattr(stock, method)(freq="yearly", pretty=True), fields)
+            except Exception as exc:
+                logger.warning("%s failed for %s: %r", method, ticker, exc)
         if not result[key]:
             result["warnings"].append(f"{key}: 年次データ取得不可")
     try:

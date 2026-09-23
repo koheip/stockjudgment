@@ -149,20 +149,6 @@ def chart_info(stock, ticker):
     return {k: v for k, v in fields.items() if v is not None}
 
 
-def statement_currency(stock, ticker):
-    # yfinance drops the reporting currency of statements; the raw timeseries keeps it.
-    url = f"https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/{ticker}"
-    now = int(datetime.now(timezone.utc).timestamp())
-    try:
-        response = stock._data.cache_get(url=url, params=dict(symbol=ticker, type="annualTotalRevenue",
-                                                                period1=now - 6 * 365 * 86400, period2=now))
-        points = response.json()["timeseries"]["result"][0]["annualTotalRevenue"]
-        return next((p["currencyCode"] for p in reversed(points) if p and p.get("currencyCode")), None)
-    except Exception as exc:
-        logger.warning("statement currency lookup failed for %s: %r", ticker, exc)
-        return None
-
-
 def statement_metrics(evidence, price=None, same_currency=False):
     """Annual-statement equivalents of the quoteSummary metrics used by RULES."""
     def latest(section, field, offset=0):
@@ -188,14 +174,12 @@ def statement_metrics(evidence, price=None, same_currency=False):
     return {k: v for k, v in metrics.items() if finite_number(v) is not None}
 
 
-def with_statement_metrics(info, stock, ticker, evidence):
+def with_statement_metrics(info, ticker, evidence):
+    info = dict(info)
+    if not info.get("financialCurrency") and evidence.get("financial_currency"):
+        info["financialCurrency"] = evidence["financial_currency"]
     if all(finite_number(info.get(key)) is not None for key, *_ in RULES):
         return info
-    info = dict(info)
-    if not info.get("financialCurrency"):
-        currency = statement_currency(stock, ticker)
-        if currency:
-            info["financialCurrency"] = currency
     price = finite_number(info.get("currentPrice")) or finite_number(info.get("regularMarketPrice"))
     same_currency = bool(info.get("currency")) and info.get("currency") == info.get("financialCurrency")
     derived = statement_metrics(evidence, price, same_currency)
@@ -230,8 +214,8 @@ def predict_stock(ticker: str, horizon_years: Annotated[int, Query(ge=1, le=30)]
         raise HTTPException(status_code=404, detail="銘柄が見つからないか、企業データがありません。")
     if info.get("quoteType") != "EQUITY":
         raise HTTPException(status_code=422, detail="企業の普通株式を指定してください。ETF・投資信託などは分類対象外です。")
-    evidence = collect_evidence(stock)
-    info = with_statement_metrics(info, stock, ticker, evidence)
+    evidence = collect_evidence(stock, ticker)
+    info = with_statement_metrics(info, ticker, evidence)
     return dict(ticker=ticker, company_name=info.get("longName") or info.get("shortName") or ticker,
                 currency=info.get("currency") or "通貨不明",
                 financial_currency=info.get("financialCurrency") or "通貨不明",

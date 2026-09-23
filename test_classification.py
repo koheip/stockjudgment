@@ -9,7 +9,7 @@ import streamlit.errors
 from streamlit.testing.v1 import AppTest
 from main import app, classify_company, classify_with_ai, predict_stock, statement_metrics
 from fastapi.testclient import TestClient
-from evidence import annual_records, evidence_coverage, collect_evidence
+from evidence import annual_records, evidence_coverage, collect_evidence, timeseries_records
 import pandas as pd
 
 
@@ -200,6 +200,21 @@ class ClassificationTests(unittest.TestCase):
         self.assertNotIn("Operating Income", records[0])
         self.assertEqual(evidence_coverage(classify_company({}), {"income": records}), ["growth", "profitability"])
         self.assertEqual(evidence_coverage(classify_company({}), {"price_history": {"price_cagr": .2}}), [])
+
+    @patch("evidence.curl_requests.get")
+    def test_timeseries_records(self, get):
+        def series(kind, *points):
+            return {"meta": {"type": [kind]}, kind: [dict(asOfDate=d, currencyCode=c, reportedValue={"raw": v}) for d, c, v in points]}
+        get.return_value.json.return_value = {"timeseries": {"result": [
+            series("annualTotalRevenue", ("2024-03-31", "JPY", 90), ("2025-03-31", "JPY", 100)),
+            series("annualDilutedEPS", ("2025-03-31", "USD", 2)),
+            series("annualFreeCashFlow", ("2025-03-31", "JPY", float("nan"))),
+            {"meta": {"type": ["annualUnknown"]}}]}}
+        sources = [("income", "", ["Total Revenue", "Diluted EPS"]), ("cashflow", "", ["Free Cash Flow"])]
+        records, currency = timeseries_records("7203.T", sources)
+        self.assertEqual(currency, "JPY")
+        self.assertEqual(records, {"income": [{"period_end": "2025-03-31", "Total Revenue": 100, "Diluted EPS": 2},
+                                              {"period_end": "2024-03-31", "Total Revenue": 90}]})
 
     def test_failed_optional_sources_do_not_discard_income(self):
         from unittest.mock import MagicMock
