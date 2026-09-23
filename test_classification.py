@@ -93,7 +93,7 @@ class ClassificationTests(unittest.TestCase):
             error = st.errors.StreamlitSecretNotFoundError("Error parsing secrets file at x.toml: invalid char")
             with patch.object(type(st.secrets), "items", side_effect=error):
                 at.button[0].click().run()
-            self.assertTrue(any("書き方に誤り" in m.value for m in at.markdown))
+            self.assertTrue(any("書き方に誤り" in e.value for e in at.error))
             request.assert_not_called()
 
     def test_cloud_finds_token_in_section_or_lowercase(self):

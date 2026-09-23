@@ -137,8 +137,7 @@ if submitted:
             st.error("公開画面の接続先がローカル用です。StreamlitのSettings → Secretsで STOCK_API_URL を https://mirai-stock-api.onrender.com に変更してください。")
             st.stop()
         if cloud and not api_token:
-            st.error("API接続用トークンが未設定です。")
-            st.markdown(token_help())
+            st.error("API接続用トークンが未設定です。\n\n" + token_help())
             st.stop()
         with st.container():
             for index, ticker in enumerate(tickers):
