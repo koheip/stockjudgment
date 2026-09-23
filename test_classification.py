@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi import HTTPException
+import streamlit as st
+import streamlit.errors
 from streamlit.testing.v1 import AppTest
 from main import app, classify_company, classify_with_ai, predict_stock
 from fastapi.testclient import TestClient
@@ -83,6 +85,15 @@ class ClassificationTests(unittest.TestCase):
             at.button[0].click().run()
             self.assertEqual(len(at.exception), 0)
             self.assertTrue(any("トークンが未設定" in error.value for error in at.error))
+            request.assert_not_called()
+
+    def test_cloud_reports_invalid_secrets_toml(self):
+        with patch("streamlit.context", SimpleNamespace(url="https://example.streamlit.app")), patch.dict(os.environ, {"STOCK_API_URL": "https://mirai-stock-api.onrender.com", "STOCK_API_TOKEN": ""}), patch("requests.get") as request:
+            at = AppTest.from_file("front.py").run()
+            error = st.errors.StreamlitSecretNotFoundError("Error parsing secrets file at x.toml: invalid char")
+            with patch.object(type(st.secrets), "items", side_effect=error):
+                at.button[0].click().run()
+            self.assertTrue(any("書き方に誤り" in m.value for m in at.markdown))
             request.assert_not_called()
 
     def test_cloud_finds_token_in_section_or_lowercase(self):

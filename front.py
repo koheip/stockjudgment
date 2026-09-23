@@ -9,44 +9,58 @@ import streamlit as st
 from result_ui import company_card, screening_chips, financial_cards, loading_card, annual_evidence_card, comparison_table
 
 
-def secret_items():
-    """Flatten Streamlit secrets so keys placed under a [section] are still found."""
+def read_secrets():
+    """Return (flattened secret items, parse error). Keys placed under a [section] are still found."""
     try:
         items = list(st.secrets.items())
-    except Exception:
-        return []
+    except Exception as error:
+        # An invalid TOML (e.g. full-width quotes) hides every secret; report it instead of "missing".
+        return [], None if "parsing" not in str(error) else str(error)
     flat = []
     for key, value in items:
         if hasattr(value, "items"):
             flat.extend((str(k), v) for k, v in value.items() if not hasattr(v, "items"))
         else:
             flat.append((str(key), value))
-    return flat
+    return flat, None
 
 
 def setting(name, default=""):
     # Tolerate common Secrets mistakes: lowercase keys, keys inside a [section], stray quotes/spaces.
-    matches = [v for k, v in secret_items() if k.strip().upper() == name]
+    matches = [v for k, v in read_secrets()[0] if k.strip().upper() == name]
     value = str(matches[0]) if matches else os.getenv(name, default)
-    return value.strip().strip("'\"").strip()
+    return value.strip().strip("'\"“”‘’　").strip()
+
+
+SECRETS_EXAMPLE = """```toml
+STOCK_API_URL = "https://mirai-stock-api.onrender.com"
+STOCK_API_TOKEN = "Renderでコピーした値"
+```"""
 
 
 def token_help():
-    keys = sorted({k for k, _ in secret_items()})
-    found = "、".join(keys) if keys else "（Secretsが空です）"
+    items, parse_error = read_secrets()
+    if parse_error:
+        return f"""**Secretsの書き方に誤りがあり、Streamlitが設定を1つも読み込めていません。**
+
+よくある原因：全角の `”` `＝` や全角スペース、値を `"` で囲んでいない、行の途中で改行されている。
+**⋮ → Settings → Secrets** の中身をすべて消し、半角英数字で次の2行だけにして **Save** してください（日本語入力をオフにして編集）。
+
+{SECRETS_EXAMPLE}
+
+エラー内容：`{parse_error.split(":", 1)[-1].strip()[:200]}`"""
+    keys = sorted({k for k, _ in items})
+    found = "、".join(keys) if keys else "なし（Secretsが空か、保存が反映されていません）"
     return f"""**Streamlitに `STOCK_API_TOKEN` が設定されていないため、APIへ接続できません。**（JevのAPIキーとは別の値です）
 
 1. https://dashboard.render.com/ → `mirai-stock-api` → **Environment** を開き、`STOCK_API_TOKEN` の値をコピー
 2. https://share.streamlit.io/ → このアプリの **⋮ → Settings → Secrets** に次の2行を貼り付けて **Save**
 
-```toml
-STOCK_API_URL = "https://mirai-stock-api.onrender.com"
-STOCK_API_TOKEN = "Renderでコピーした値"
-```
+{SECRETS_EXAMPLE}
 
 3. 1分ほど待っても変わらない場合は **⋮ → Reboot app** を実行
 
-現在Secretsで見つかったキー名：{found}"""
+現在Secretsで見つかったキー名：{found}""" + ("\n\n`STOCK_API_TOKEN` はありますが値が空です。`\"` と `\"` の間にRenderの値を貼り付けてください。" if any(k.strip().upper() == "STOCK_API_TOKEN" for k in keys) else "")
 
 st.set_page_config(page_title="MIRAI STOCK ✦ 未来の成長をみつけよう", page_icon="🪐", layout="wide")
 st.markdown(f"<style>{Path(__file__).with_name('style.css').read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
