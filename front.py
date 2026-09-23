@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import pandas as pd
 import requests
@@ -78,8 +78,20 @@ if submitted:
     else:
         results, errors = [], []
         progress = st.empty()
-        api_url = setting("STOCK_API_URL", "http://localhost:8001").rstrip("/")
-        api_token = setting("STOCK_API_TOKEN")
+        page_host = urlsplit(st.context.url or "").hostname or ""
+        cloud = page_host.endswith(".streamlit.app")
+        api_url = setting("STOCK_API_URL", "https://mirai-stock-api.onrender.com" if cloud else "http://localhost:8001").strip().rstrip("/")
+        api_token = setting("STOCK_API_TOKEN").strip()
+        parsed_api = urlsplit(api_url)
+        if parsed_api.scheme not in ("http", "https") or not parsed_api.hostname or parsed_api.username or parsed_api.password:
+            st.error("STOCK_API_URLに有効なAPI URLを設定してください。")
+            st.stop()
+        if cloud and (parsed_api.scheme != "https" or parsed_api.hostname in ("localhost", "127.0.0.1", "::1")):
+            st.error("公開画面の接続先がローカル用です。StreamlitのSettings → Secretsで STOCK_API_URL を https://mirai-stock-api.onrender.com に変更してください。")
+            st.stop()
+        if cloud and not api_token:
+            st.error("API接続用トークンが未設定です。StreamlitのSettings → Secretsに STOCK_API_TOKEN を追加し、RenderのEnvironmentにある同名の値を設定してください。JevのAPIキーとは別の値です。")
+            st.stop()
         with st.container():
             for index, ticker in enumerate(tickers):
                 progress.markdown(loading_card(index, len(tickers), ticker, len(errors)), unsafe_allow_html=True)
@@ -90,6 +102,8 @@ if submitted:
                         results.append(data)
                     else:
                         detail = data.get("detail", "分類できませんでした。") if isinstance(data, dict) else "応答形式が不正です。"
+                        if response.status_code == 401:
+                            detail = "APIには接続できていますが、認証に失敗しました。StreamlitとRenderの STOCK_API_TOKEN を同じ値に設定してください。"
                         errors.append(f"{ticker}: {detail}")
                         if response.status_code in (401, 429, 503):
                             errors.append("残りの銘柄の処理を停止しました。時間をおくか、接続設定を確認してください。")
@@ -98,7 +112,9 @@ if submitted:
                 except requests.exceptions.Timeout:
                     errors.append(f"{ticker}: 取得がタイムアウトしました。")
                 except requests.exceptions.ConnectionError:
-                    errors.append(f"{ticker}: APIに接続できません。バックエンドの起動を確認してください。")
+                    errors.append(f"{ticker}: 接続先 {parsed_api.hostname} に到達できません。STOCK_API_URLとRenderのサービス状態を確認してください。")
+                    progress.empty()
+                    break
                 except (requests.exceptions.RequestException, ValueError):
                     errors.append(f"{ticker}: 有効な応答を取得できませんでした。")
                 progress.markdown(loading_card(index + 1, len(tickers), tickers[index + 1] if index + 1 < len(tickers) else None, len(errors)), unsafe_allow_html=True)

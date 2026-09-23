@@ -69,6 +69,22 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(at.metric[0].value, "1社")
         self.assertTrue(any('comparison-table' in m.value and 'AAPL' in m.value for m in at.markdown))
 
+    def test_cloud_rejects_local_api(self):
+        with patch("streamlit.context", SimpleNamespace(url="https://example.streamlit.app")), patch.dict(os.environ, {"STOCK_API_URL": "http://localhost:8001"}), patch("requests.get") as request:
+            at = AppTest.from_file("front.py").run()
+            at.button[0].click().run()
+            self.assertEqual(len(at.exception), 0)
+            self.assertTrue(any("ローカル用" in error.value for error in at.error))
+            request.assert_not_called()
+
+    def test_cloud_requires_token(self):
+        with patch("streamlit.context", SimpleNamespace(url="https://example.streamlit.app")), patch.dict(os.environ, {"STOCK_API_URL": "https://mirai-stock-api.onrender.com", "STOCK_API_TOKEN": ""}), patch("requests.get") as request:
+            at = AppTest.from_file("front.py").run()
+            at.button[0].click().run()
+            self.assertEqual(len(at.exception), 0)
+            self.assertTrue(any("トークンが未設定" in error.value for error in at.error))
+            request.assert_not_called()
+
     @patch.dict(os.environ, {"TYPESAFE_API_KEY": "test-key"})
     @patch("main.TypeSafeClient")
     def test_ai_overrides_screening(self, factory):
