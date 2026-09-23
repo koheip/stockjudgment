@@ -6,7 +6,7 @@ from urllib.parse import quote
 import pandas as pd
 import requests
 import streamlit as st
-from result_ui import company_card, screening_chips, financial_cards, loading_card, annual_evidence_card
+from result_ui import company_card, screening_chips, financial_cards, loading_card, annual_evidence_card, comparison_table
 
 
 def setting(name, default=""):
@@ -150,7 +150,7 @@ if results:
                 st.caption("一部の年次データは取得できませんでした。利用可能なデータで判定しています。")
             st.caption(f"業種：{result['sector']} ／ 取得日時（UTC）：{result['retrieved_at']}")
     with st.expander("≡ すべての企業を一覧で比較"):
-        st.dataframe(frame, hide_index=True, width="stretch")
+        st.markdown(comparison_table(results), unsafe_allow_html=True)
     st.download_button("↓ リサーチ結果をCSVで保存", frame.to_csv(index=False).encode("utf-8-sig"), "stock_classification.csv", "text/csv")
 else:
     st.markdown('''<div class="empty-state"><span class="empty-icon">✧</span><div><strong>あなたの未来リストは、ここから。</strong><p>銘柄を入力してチェックすると、分類結果とその理由がここに並びます。</p></div></div>''', unsafe_allow_html=True)

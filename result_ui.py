@@ -6,6 +6,22 @@ def text(value):
     return escape(str(value), quote=True)
 
 
+def comparison_table(results):
+    rows = []
+    for result in results:
+        c = result["classification"]
+        tone, icon = {"GROW": ("mint", "↗"), "LOW_GROWTH": ("rose", "◇"), "HOLD": ("lavender", "✧")}.get(c["category"], ("lavender", "✧"))
+        ai = c.get("mode") == "jev"
+        mode = "✦ Jev AI" if ai else "データ不足" if c.get("mode") == "insufficient_data" else "AI未実行・失敗"
+        confidence = f"{c['confidence']:.1%}" if ai and c.get("confidence") is not None else "—"
+        score = f"{c['score']:.1f}%" if c.get("score") is not None else "—"
+        price = f"{result['latest_price']:,.2f}" if result.get("latest_price") is not None else "—"
+        rows.append(f'<tr><th scope="row"><strong>{text(result["ticker"])}</strong><span class="compare-name">{text(result["company_name"])}</span></th><td><span class="screening-chip {tone}">{icon} {text(c["label"])}</span></td><td>{text(result.get("prediction_horizon_years", 10))}年後</td><td><span class="compare-mode">{mode}</span></td><td class="compare-number">{confidence}</td><td class="compare-number">{score}</td><td>{text(c["available_metrics"])} / 7</td><td class="compare-number">{price}<span class="compare-currency">{text(result.get("currency", "通貨不明"))}</span></td></tr>')
+    columns = ["銘柄 / 企業名", "判定結果", "判定期間", "判定方式", "AI確信度", "固定基準の達成率", "取得指標数", "株価 / 通貨"]
+    headings = ''.join(f'<th scope="col">{label}</th>' for label in columns)
+    return f'<section class="evidence-card comparison-card"><div class="evidence-header"><div><span class="section-kicker">✧ COMPARE YOUR DISCOVERIES</span><h4>気になる企業を、並べてチェック。</h4></div><span class="evidence-count">{len(results)}社</span></div><div class="evidence-meta"><span>確信度・達成率は株価の上昇確率ではありません。</span></div><div class="evidence-scroll" tabindex="0" role="region" aria-label="すべての企業の比較表"><table class="evidence-table comparison-table"><caption>今回の判定結果一覧</caption><thead><tr>{headings}</tr></thead><tbody>{"".join(rows)}</tbody></table></div><div class="evidence-footnote">横にスクロールして比較できます。— は取得不可またはAI判定なし。通貨・判定期間の違いにご注意ください。</div></section>'
+
+
 def loading_card(completed, total, ticker=None, errors=0):
     done = completed == total
     percent = round(completed / total * 100)

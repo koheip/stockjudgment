@@ -67,7 +67,7 @@ class ClassificationTests(unittest.TestCase):
             self.assertEqual(request.call_args.kwargs["params"], {"horizon_years": 5})
         self.assertEqual(len(at.exception), 0)
         self.assertEqual(at.metric[0].value, "1社")
-        self.assertEqual(len(at.dataframe), 1)
+        self.assertTrue(any('comparison-table' in m.value and 'AAPL' in m.value for m in at.markdown))
 
     @patch.dict(os.environ, {"TYPESAFE_API_KEY": "test-key"})
     @patch("main.TypeSafeClient")

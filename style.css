@@ -1,4 +1,12 @@
 :root { color-scheme: light; }
+.comparison-card { margin-top: 6px !important; }
+.comparison-table .compare-name { display: block; max-width: 210px; min-width: 100px; white-space: normal; overflow-wrap: anywhere; font-size: 11px; font-weight: 400; color: #82718d; margin-top: 5px; line-height: 1.6; }
+.comparison-table strong { color: #704b8e; letter-spacing: .6px; }
+.comparison-table .compare-mode { color: #80618f; font-size: 11px; }
+.comparison-table .compare-number { font-weight: 700; color: #6f4e87; }
+.comparison-table .compare-currency { display: block; font-size: 10px; color: #897496; font-weight: 400; margin-top: 4px; }
+.comparison-table .screening-chip { display: inline-block; }
+@media (max-width: 640px) { .comparison-table .compare-name { max-width: 130px; }.comparison-card .evidence-header h4 { font-size: 15px; } }
 .evidence-card { margin: 16px 0 20px; padding: 22px; border: 1px solid #e5d6f0; border-radius: 22px; background: linear-gradient(130deg, #fff, #fcf5fc); box-shadow: 0 7px 24px #9674bf0c; }
 .evidence-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .evidence-header h4 { margin: 0; padding: 7px 0 0; font-size: 18px; color: #634379; }
