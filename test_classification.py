@@ -51,9 +51,16 @@ class ClassificationTests(unittest.TestCase):
             predict_stock("ETF")
         self.assertEqual(raised.exception.status_code, 422)
         ticker.return_value.get_info.side_effect = RuntimeError("unavailable")
+        ticker.return_value.history_metadata = {}
         with self.assertRaises(HTTPException) as raised:
             predict_stock("AAPL")
         self.assertEqual(raised.exception.status_code, 502)
+        # Cloud hosts: quoteSummary returns nothing, the chart metadata still identifies the stock.
+        ticker.return_value.get_info.side_effect = None
+        ticker.return_value.get_info.return_value = {"trailingPegRatio": None}
+        ticker.return_value.history_metadata = {"longName": "Apple Inc.", "instrumentType": "EQUITY", "currency": "USD", "regularMarketPrice": 300.0}
+        result = predict_stock("AAPL")
+        self.assertEqual((result["company_name"], result["latest_price"], result["currency"]), ("Apple Inc.", 300.0, "USD"))
 
     def test_ui_results(self):
         result = dict(ticker="AAPL", company_name="Example", currency="USD", financial_currency="USD",

@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 import re
@@ -21,6 +22,7 @@ except ImportError:
 # inherited from an IDE/terminal must not shadow a corrected .env value.
 if not production():
     load_dotenv(Path(__file__).with_name(".env"), override=True)
+logger = logging.getLogger("uvicorn.error")
 LABELS = {"GROW": "伸びる候補", "LOW_GROWTH": "伸びにくい候補", "HOLD": "判定保留"}
 
 
@@ -134,16 +136,39 @@ def root():
     return {"message": "Stock growth screening API is running"}
 
 
+def chart_info(stock, ticker):
+    try:
+        stock.history(period="5d", timeout=15)
+        meta = stock.history_metadata or {}
+    except Exception as exc:
+        logger.warning("chart fallback failed for %s: %r", ticker, exc)
+        return {}
+    logger.info("using chart metadata for %s", ticker)
+    fields = dict(shortName=meta.get("shortName"), longName=meta.get("longName"), quoteType=meta.get("instrumentType"),
+                  currency=meta.get("currency"), regularMarketPrice=meta.get("regularMarketPrice"))
+    return {k: v for k, v in fields.items() if v is not None}
+
+
 def predict_stock(ticker: str, horizon_years: Annotated[int, Query(ge=1, le=30)] = 10):
     ticker = ticker.strip().upper()
     if not re.fullmatch(r"[A-Z0-9^][A-Z0-9.^=-]{0,24}", ticker):
         raise HTTPException(status_code=400, detail="銘柄コードの形式を確認してください。")
+    stock = yf.Ticker(ticker)
+    info_failed = False
     try:
-        stock = yf.Ticker(ticker)
         info = stock.get_info()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="企業データを取得できませんでした。時間をおいて再試行してください。") from exc
-    if not isinstance(info, dict) or not any(info.get(k) for k in ("shortName", "longName", "quoteType")):
+        logger.warning("get_info failed for %s: %r", ticker, exc)
+        info, info_failed = {}, True
+    if not isinstance(info, dict):
+        info = {}
+    if not any(info.get(k) for k in ("shortName", "longName", "quoteType")):
+        # Yahoo often blocks the quoteSummary endpoint from cloud hosts such as Render;
+        # the chart endpoint usually still answers with name, type, currency and price.
+        info = dict(info, **chart_info(stock, ticker))
+    if not any(info.get(k) for k in ("shortName", "longName", "quoteType")):
+        if info_failed:
+            raise HTTPException(status_code=502, detail="企業データを取得できませんでした。時間をおいて再試行してください。")
         raise HTTPException(status_code=404, detail="銘柄が見つからないか、企業データがありません。")
     if info.get("quoteType") != "EQUITY":
         raise HTTPException(status_code=422, detail="企業の普通株式を指定してください。ETF・投資信託などは分類対象外です。")
