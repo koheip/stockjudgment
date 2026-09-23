@@ -9,11 +9,44 @@ import streamlit as st
 from result_ui import company_card, screening_chips, financial_cards, loading_card, annual_evidence_card, comparison_table
 
 
-def setting(name, default=""):
+def secret_items():
+    """Flatten Streamlit secrets so keys placed under a [section] are still found."""
     try:
-        return str(st.secrets.get(name, os.getenv(name, default)))
-    except FileNotFoundError:
-        return os.getenv(name, default)
+        items = list(st.secrets.items())
+    except Exception:
+        return []
+    flat = []
+    for key, value in items:
+        if hasattr(value, "items"):
+            flat.extend((str(k), v) for k, v in value.items() if not hasattr(v, "items"))
+        else:
+            flat.append((str(key), value))
+    return flat
+
+
+def setting(name, default=""):
+    # Tolerate common Secrets mistakes: lowercase keys, keys inside a [section], stray quotes/spaces.
+    matches = [v for k, v in secret_items() if k.strip().upper() == name]
+    value = str(matches[0]) if matches else os.getenv(name, default)
+    return value.strip().strip("'\"").strip()
+
+
+def token_help():
+    keys = sorted({k for k, _ in secret_items()})
+    found = "、".join(keys) if keys else "（Secretsが空です）"
+    return f"""**Streamlitに `STOCK_API_TOKEN` が設定されていないため、APIへ接続できません。**（JevのAPIキーとは別の値です）
+
+1. https://dashboard.render.com/ → `mirai-stock-api` → **Environment** を開き、`STOCK_API_TOKEN` の値をコピー
+2. https://share.streamlit.io/ → このアプリの **⋮ → Settings → Secrets** に次の2行を貼り付けて **Save**
+
+```toml
+STOCK_API_URL = "https://mirai-stock-api.onrender.com"
+STOCK_API_TOKEN = "Renderでコピーした値"
+```
+
+3. 1分ほど待っても変わらない場合は **⋮ → Reboot app** を実行
+
+現在Secretsで見つかったキー名：{found}"""
 
 st.set_page_config(page_title="MIRAI STOCK ✦ 未来の成長をみつけよう", page_icon="🪐", layout="wide")
 st.markdown(f"<style>{Path(__file__).with_name('style.css').read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
@@ -80,8 +113,8 @@ if submitted:
         progress = st.empty()
         page_host = urlsplit(st.context.url or "").hostname or ""
         cloud = page_host.endswith(".streamlit.app")
-        api_url = setting("STOCK_API_URL", "https://mirai-stock-api.onrender.com" if cloud else "http://localhost:8001").strip().rstrip("/")
-        api_token = setting("STOCK_API_TOKEN").strip()
+        api_url = setting("STOCK_API_URL", "https://mirai-stock-api.onrender.com" if cloud else "http://localhost:8001").rstrip("/")
+        api_token = setting("STOCK_API_TOKEN")
         parsed_api = urlsplit(api_url)
         if parsed_api.scheme not in ("http", "https") or not parsed_api.hostname or parsed_api.username or parsed_api.password:
             st.error("STOCK_API_URLに有効なAPI URLを設定してください。")
@@ -90,7 +123,8 @@ if submitted:
             st.error("公開画面の接続先がローカル用です。StreamlitのSettings → Secretsで STOCK_API_URL を https://mirai-stock-api.onrender.com に変更してください。")
             st.stop()
         if cloud and not api_token:
-            st.error("API接続用トークンが未設定です。StreamlitのSettings → Secretsに STOCK_API_TOKEN を追加し、RenderのEnvironmentにある同名の値を設定してください。JevのAPIキーとは別の値です。")
+            st.error("API接続用トークンが未設定です。")
+            st.markdown(token_help())
             st.stop()
         with st.container():
             for index, ticker in enumerate(tickers):

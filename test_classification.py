@@ -85,6 +85,16 @@ class ClassificationTests(unittest.TestCase):
             self.assertTrue(any("トークンが未設定" in error.value for error in at.error))
             request.assert_not_called()
 
+    def test_cloud_finds_token_in_section_or_lowercase(self):
+        with patch("streamlit.context", SimpleNamespace(url="https://example.streamlit.app")), patch.dict(os.environ, {"STOCK_API_URL": "https://mirai-stock-api.onrender.com", "STOCK_API_TOKEN": ""}), patch("requests.get") as request:
+            request.return_value.ok, request.return_value.status_code = False, 401
+            request.return_value.json.return_value = {"detail": "x"}
+            at = AppTest.from_file("front.py")
+            at.secrets["general"] = {"stock_api_token": ' "abc" '}
+            at.run()
+            at.button[0].click().run()
+            self.assertEqual(request.call_args.kwargs["headers"], {"X-API-Key": "abc"})
+
     @patch.dict(os.environ, {"TYPESAFE_API_KEY": "test-key"})
     @patch("main.TypeSafeClient")
     def test_ai_overrides_screening(self, factory):
