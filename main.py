@@ -149,6 +149,64 @@ def chart_info(stock, ticker):
     return {k: v for k, v in fields.items() if v is not None}
 
 
+def statement_currency(stock, ticker):
+    # yfinance drops the reporting currency of statements; the raw timeseries keeps it.
+    url = f"https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/{ticker}"
+    now = int(datetime.now(timezone.utc).timestamp())
+    try:
+        response = stock._data.cache_get(url=url, params=dict(symbol=ticker, type="annualTotalRevenue",
+                                                                period1=now - 6 * 365 * 86400, period2=now))
+        points = response.json()["timeseries"]["result"][0]["annualTotalRevenue"]
+        return next((p["currencyCode"] for p in reversed(points) if p and p.get("currencyCode")), None)
+    except Exception as exc:
+        logger.warning("statement currency lookup failed for %s: %r", ticker, exc)
+        return None
+
+
+def statement_metrics(evidence, price=None, same_currency=False):
+    """Annual-statement equivalents of the quoteSummary metrics used by RULES."""
+    def latest(section, field, offset=0):
+        values = [r[field] for r in evidence.get(section, []) if field in r]
+        return values[offset] if len(values) > offset else None
+
+    def growth(field):
+        current, previous = latest("income", field), latest("income", field, 1)
+        return current / previous - 1 if current is not None and previous and previous > 0 else None
+
+    revenue, operating = latest("income", "Total Revenue"), latest("income", "Operating Income")
+    net_income, eps = latest("income", "Net Income"), latest("income", "Diluted EPS")
+    debt, equity = latest("balance", "Total Debt"), latest("balance", "Stockholders Equity")
+    positive_equity = equity is not None and equity > 0
+    metrics = dict(
+        revenueGrowth=growth("Total Revenue"), earningsGrowth=growth("Net Income"),
+        operatingMargins=operating / revenue if operating is not None and revenue and revenue > 0 else None,
+        returnOnEquity=net_income / equity if net_income is not None and positive_equity else None,
+        freeCashflow=latest("cashflow", "Free Cash Flow"),
+        debtToEquity=debt / equity * 100 if debt is not None and positive_equity else None,
+        # Price and EPS are only comparable when both are in the same currency (ADRs are not).
+        trailingPE=price / eps if price and same_currency and eps is not None and eps > 0 else None)
+    return {k: v for k, v in metrics.items() if finite_number(v) is not None}
+
+
+def with_statement_metrics(info, stock, ticker, evidence):
+    if all(finite_number(info.get(key)) is not None for key, *_ in RULES):
+        return info
+    info = dict(info)
+    if not info.get("financialCurrency"):
+        currency = statement_currency(stock, ticker)
+        if currency:
+            info["financialCurrency"] = currency
+    price = finite_number(info.get("currentPrice")) or finite_number(info.get("regularMarketPrice"))
+    same_currency = bool(info.get("currency")) and info.get("currency") == info.get("financialCurrency")
+    derived = statement_metrics(evidence, price, same_currency)
+    for key, value in derived.items():
+        if finite_number(info.get(key)) is None:
+            info[key] = value
+    if derived:
+        logger.info("filled %s for %s from annual statements", sorted(derived), ticker)
+    return info
+
+
 def predict_stock(ticker: str, horizon_years: Annotated[int, Query(ge=1, le=30)] = 10):
     ticker = ticker.strip().upper()
     if not re.fullmatch(r"[A-Z0-9^][A-Z0-9.^=-]{0,24}", ticker):
@@ -172,13 +230,15 @@ def predict_stock(ticker: str, horizon_years: Annotated[int, Query(ge=1, le=30)]
         raise HTTPException(status_code=404, detail="銘柄が見つからないか、企業データがありません。")
     if info.get("quoteType") != "EQUITY":
         raise HTTPException(status_code=422, detail="企業の普通株式を指定してください。ETF・投資信託などは分類対象外です。")
+    evidence = collect_evidence(stock)
+    info = with_statement_metrics(info, stock, ticker, evidence)
     return dict(ticker=ticker, company_name=info.get("longName") or info.get("shortName") or ticker,
                 currency=info.get("currency") or "通貨不明",
                 financial_currency=info.get("financialCurrency") or "通貨不明",
                 latest_price=finite_number(info.get("currentPrice")) or finite_number(info.get("regularMarketPrice")),
                 sector=info.get("sector") or "不明", prediction_horizon_years=horizon_years,
                 retrieved_at=datetime.now(timezone.utc).isoformat(),
-                classification=classify_with_ai(ticker, info, classify_company(info), collect_evidence(stock), horizon_years))
+                classification=classify_with_ai(ticker, info, classify_company(info), evidence, horizon_years))
 
 
 @app.get("/predict/{ticker}", dependencies=[Depends(authorize)])

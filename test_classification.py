@@ -7,7 +7,7 @@ from fastapi import HTTPException
 import streamlit as st
 import streamlit.errors
 from streamlit.testing.v1 import AppTest
-from main import app, classify_company, classify_with_ai, predict_stock
+from main import app, classify_company, classify_with_ai, predict_stock, statement_metrics
 from fastapi.testclient import TestClient
 from evidence import annual_records, evidence_coverage, collect_evidence
 import pandas as pd
@@ -37,6 +37,19 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(classify_company(data)["category"], "GROW")
         data["operatingMargins"] = .09
         self.assertEqual(classify_company(data)["category"], "LOW_GROWTH")
+
+    def test_statement_metrics(self):
+        evidence = {"income": [{"Total Revenue": 110, "Operating Income": 22, "Net Income": 12, "Diluted EPS": 2},
+                               {"Total Revenue": 100, "Net Income": 10}],
+                    "cashflow": [{"Free Cash Flow": 5}], "balance": [{"Total Debt": 30, "Stockholders Equity": 60}]}
+        metrics = statement_metrics(evidence, price=40, same_currency=True)
+        self.assertAlmostEqual(metrics["revenueGrowth"], .1)
+        self.assertAlmostEqual(metrics["earningsGrowth"], .2)
+        self.assertAlmostEqual(metrics["operatingMargins"], .2)
+        self.assertAlmostEqual(metrics["returnOnEquity"], .2)
+        self.assertEqual((metrics["freeCashflow"], metrics["debtToEquity"], metrics["trailingPE"]), (5, 50, 20))
+        self.assertNotIn("trailingPE", statement_metrics(evidence, price=40, same_currency=False))
+        self.assertEqual(statement_metrics({}), {})
 
     @patch("main.yf.Ticker")
     def test_api(self, ticker):
