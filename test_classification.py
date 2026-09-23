@@ -105,6 +105,11 @@ class ClassificationTests(unittest.TestCase):
             at.run()
             at.button[0].click().run()
             self.assertEqual(request.call_args.kwargs["headers"], {"X-API-Key": "abc"})
+            at = AppTest.from_file("front.py")
+            at.secrets["API_TOKEN"] = "def"
+            at.run()
+            at.button[0].click().run()
+            self.assertEqual(request.call_args.kwargs["headers"], {"X-API-Key": "def"})
 
     @patch.dict(os.environ, {"TYPESAFE_API_KEY": "test-key"})
     @patch("main.TypeSafeClient")

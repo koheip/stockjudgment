@@ -27,7 +27,9 @@ def read_secrets():
 
 def setting(name, default=""):
     # Tolerate common Secrets mistakes: lowercase keys, keys inside a [section], stray quotes/spaces.
-    matches = [v for k, v in read_secrets()[0] if k.strip().upper() == name]
+    # Also accept the name without the STOCK_ prefix (e.g. API_TOKEN), a frequent typo.
+    names = (name, name.removeprefix("STOCK_"))
+    matches = [v for n in names for k, v in read_secrets()[0] if k.strip().upper() == n]
     value = str(matches[0]) if matches else os.getenv(name, default)
     return value.strip().strip("'\"“”‘’　").strip()
 
